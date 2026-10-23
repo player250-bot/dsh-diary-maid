@@ -46,7 +46,7 @@
   },
   "license": "MIT",
   "scripts": {
-    "test": "node --test tests/*.test.js",
+    "test": "node --test --test-concurrency=1 tests/*.test.js",
     "check": "node --check lib/index.js && node --check lib/client.js && node --check lib/vault.js && node --check lib/git.js"
   }
 }
