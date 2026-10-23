@@ -97,6 +97,25 @@ test('list, streak and inbox behave for one day and a gap', async () => {
   });
 });
 
+test('settings, avatars and persona stay inside the vault', async () => {
+  await withVault(async (vault, root) => {
+    await vault.saveSettings({ avatar: '鲸汐-立绘.jpg' });
+    assert.equal((await vault.settings()).avatar, '鲸汐-立绘.jpg');
+
+    await fs.writeFile(path.join(root, '人设', '新头像.png'), 'not-a-real-png');
+    await fs.writeFile(path.join(root, '人设', 'notes.txt'), 'ignore me');
+    const avatars = await vault.avatars();
+    assert.deepEqual(avatars, ['新头像.png']);
+
+    const persona = await vault.readPersona('内置人设');
+    assert.equal(persona.source, 'package');
+    await vault.writePersona('你是鲸汐。\n');
+    const saved = await vault.readPersona('内置人设');
+    assert.equal(saved.source, 'vault');
+    assert.equal(saved.text, '你是鲸汐。\n');
+  });
+});
+
 test('maid and profile pages use their own paths', async () => {
   await withVault(async (vault) => {
     const maid = await vault.write('maid', '2026-10-23', { meta: { mood: '尾巴有点晃' }, body: '他今天说了三次算了。\n' });
