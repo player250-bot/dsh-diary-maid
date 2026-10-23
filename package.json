@@ -1,0 +1,51 @@
+{
+  "name": "dsh-diary-maid",
+  "version": "0.1.0",
+  "description": "鲸汐 · DSH 日记女仆：蓝色鲸鱼女仆替主人保管日记，一天一页，独立 git 仓库，可回退",
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "diary",
+    "journal",
+    "persona"
+  ],
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg",
+    "./persona/*": "./persona/*"
+  },
+  "files": [
+    "lib",
+    "locale",
+    "persona",
+    "assets",
+    "docs",
+    "cordis.patch.yml",
+    "icon.svg",
+    "README.md",
+    "LICENSE"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-layout"
+      ]
+    }
+  },
+  "license": "MIT",
+  "scripts": {
+    "test": "node --test tests/*.test.js",
+    "check": "node --check lib/index.js && node --check lib/client.js && node --check lib/vault.js && node --check lib/git.js"
+  }
+}
