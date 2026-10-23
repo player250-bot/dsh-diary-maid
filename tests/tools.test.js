@@ -83,6 +83,15 @@ test('diary_write handles maid pages and the profile', async () => {
     const maid = await definitions.get('diary_read').execute({ kind: 'maid', date: today });
     assert.match(maid.body, /三次算了/u);
 
+    await definitions.get('diary_write').execute({
+      kind: 'interview',
+      date: today,
+      mood: '有点累',
+      body: '## 问：今天最累的一刻？\n答：改了三遍配置。\n',
+    });
+    const interview = await definitions.get('diary_read').execute({ kind: 'interview', date: today });
+    assert.match(interview.body, /改了三遍配置/u);
+
     await definitions.get('diary_write').execute({ kind: 'profile', body: '# 主人侧写\n\n- [2026-10-23][事实] 在写日记插件。\n' });
     const profile = await definitions.get('diary_read').execute({ kind: 'profile' });
     assert.equal(profile.exists, true);

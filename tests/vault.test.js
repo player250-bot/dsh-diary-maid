@@ -116,6 +116,18 @@ test('settings, avatars and persona stay inside the vault', async () => {
   });
 });
 
+test('interview pages live under 鲸汐/访谈 and list newest first', async () => {
+  await withVault(async (vault, root) => {
+    await vault.write('interview', '2026-10-22', { meta: { mood: '平静' }, body: '## 问：今天最累的一刻？\n答：下午。\n' });
+    const saved = await vault.write('interview', '2026-10-23', { meta: { mood: '有点累' }, body: '## 问：今天最累的一刻？\n答：改了三遍配置。\n' });
+    assert.equal(saved.path, '鲸汐/访谈/2026-10-23.md');
+    const list = await vault.interviews(5);
+    assert.deepEqual(list.map((item) => item.date), ['2026-10-23', '2026-10-22']);
+    assert.equal(list[0].mood, '有点累');
+    assert.match(list[0].excerpt, /改了三遍配置/u);
+  });
+});
+
 test('maid and profile pages use their own paths', async () => {
   await withVault(async (vault) => {
     const maid = await vault.write('maid', '2026-10-23', { meta: { mood: '尾巴有点晃' }, body: '他今天说了三次算了。\n' });
