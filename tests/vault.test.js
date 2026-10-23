@@ -128,6 +128,34 @@ test('interview pages live under 鲸汐/访谈 and list newest first', async () 
   });
 });
 
+test('search, calendar, book and notes share the same vault', async () => {
+  await withVault(async (vault, root) => {
+    await vault.write('diary', '2026-10-22', { meta: { title: '前天地' }, body: '昨天在改配置。\n' });
+    await vault.write('diary', '2026-10-23', { meta: { title: '今天' }, body: '今天把工具接上了。\n' });
+    await vault.write('diary', '2026-10-24', { meta: { title: '私密', private: true }, body: '这件事不要导出。\n' });
+
+    const hits = await vault.search('工具');
+    assert.equal(hits.length, 1);
+    assert.equal(hits[0].date, '2026-10-23');
+    assert.equal(hits[0].kind, 'diary');
+
+    const calendar = await vault.calendar('2026-10');
+    assert.deepEqual(calendar.entries.map((item) => item.date), ['2026-10-22', '2026-10-23', '2026-10-24']);
+    assert.deepEqual(calendar.maid, []);
+
+    const book = await vault.book({});
+    assert.equal(book.count, 2);
+    assert.match(book.text, /## 2026-10-22/u);
+    assert.match(book.text, /## 2026-10-23/u);
+    assert.doesNotMatch(book.text, /不要导出/u);
+
+    await fs.writeFile(path.join(root, '鲸汐/心事/关于主人.md'), '# 心事\n\n他今天笑了。\n');
+    const notes = await vault.notes();
+    assert.deepEqual(notes.map((item) => item.name), ['关于主人']);
+    assert.match(await vault.readNote('关于主人'), /他今天笑了/u);
+  });
+});
+
 test('maid and profile pages use their own paths', async () => {
   await withVault(async (vault) => {
     const maid = await vault.write('maid', '2026-10-23', { meta: { mood: '尾巴有点晃' }, body: '他今天说了三次算了。\n' });
