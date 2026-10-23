@@ -116,15 +116,31 @@ test('settings, avatars and persona stay inside the vault', async () => {
   });
 });
 
-test('interview pages live under 鲸汐/访谈 and list newest first', async () => {
+test('room logs live under 鲸汐/房间 with a derived TOC', async () => {
   await withVault(async (vault, root) => {
-    await vault.write('interview', '2026-10-22', { meta: { mood: '平静' }, body: '## 问：今天最累的一刻？\n答：下午。\n' });
-    const saved = await vault.write('interview', '2026-10-23', { meta: { mood: '有点累' }, body: '## 问：今天最累的一刻？\n答：改了三遍配置。\n' });
-    assert.equal(saved.path, '鲸汐/访谈/2026-10-23.md');
-    const list = await vault.interviews(5);
-    assert.deepEqual(list.map((item) => item.date), ['2026-10-23', '2026-10-22']);
-    assert.equal(list[0].mood, '有点累');
-    assert.match(list[0].excerpt, /改了三遍配置/u);
+    const first = await vault.writeRoomLog({
+      at: new Date('2026-10-22T21:10:00+08:00'),
+      title: '随便坐坐',
+      summary: '聊了聊今天。',
+      tags: ['房间'],
+      body: '他今天有点累。\n',
+    });
+    const second = await vault.writeRoomLog({
+      at: new Date('2026-10-23T23:40:00+08:00'),
+      title: '聊了新房间和记忆目录',
+      summary: '主人想用目录而不是时间来分对话。',
+      tags: ['房间', '设计'],
+      body: '他把杯子推过来。\n',
+    });
+    assert.equal(second.path, '鲸汐/房间/2026-10-23-234000.md');
+    const list = await vault.roomLogs(5);
+    assert.deepEqual(list.map((item) => item.id), [second.id, first.id]);
+    assert.equal(list[0].title, '聊了新房间和记忆目录');
+    assert.deepEqual(list[0].tags, ['房间', '设计']);
+    const entry = await vault.readRoomLog(second.id);
+    assert.match(entry.body, /杯子/u);
+    const toc = await fs.readFile(path.join(root, '鲸汐/房间/目录.md'), 'utf8');
+    assert.match(toc, /聊了新房间和记忆目录/u);
   });
 });
 

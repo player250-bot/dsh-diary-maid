@@ -30,7 +30,7 @@ async function harness() {
 test('registers exactly the three diary tools', async () => {
   const { root, definitions } = await harness();
   try {
-    assert.deepEqual([...definitions.keys()].sort(), ['diary_capture', 'diary_read', 'diary_write']);
+    assert.deepEqual([...definitions.keys()].sort(), ['diary_capture', 'diary_read', 'diary_write', 'memory_search', 'room_log', 'room_read']);
     for (const definition of definitions.values()) {
       assert.equal(typeof definition.execute, 'function');
       assert.equal(typeof definition.output.render, 'function');
@@ -70,6 +70,35 @@ test('diary_capture appends to the inbox and diary_write reads back', async () =
   }
 });
 
+test('room_log writes a room page, room_read opens it, memory_search finds it', async () => {
+  const { root, vault, definitions } = await harness();
+  try {
+    const saved = await definitions.get('room_log').execute({
+      title: '聊了聊房间',
+      summary: '主人想要一个不带任务的房间。',
+      tags: ['房间', '设计'],
+      mood: '轻快',
+      body: '他把杯子推过来，说想要一个随便聊的地方。\n',
+    });
+    assert.match(saved.id, /^\d{4}-\d{2}-\d{2}-\d{6}$/u);
+    const list = await vault.roomLogs(5);
+    assert.equal(list[0].title, '聊了聊房间');
+    assert.deepEqual(list[0].tags, ['房间', '设计']);
+
+    const entry = await definitions.get('room_read').execute({ id: saved.id });
+    assert.match(entry.body, /随便聊的地方/u);
+
+    const hits = await definitions.get('memory_search').execute({ query: '随便聊' });
+    assert.equal(hits.items.length, 1);
+    assert.equal(hits.items[0].kind, 'room');
+
+    const toc = await vault.readRoomLog(saved.id);
+    assert.equal(toc.summary, '主人想要一个不带任务的房间。');
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
 test('diary_write handles maid pages and the profile', async () => {
   const { root, vault, definitions } = await harness();
   try {
@@ -82,15 +111,6 @@ test('diary_write handles maid pages and the profile', async () => {
     });
     const maid = await definitions.get('diary_read').execute({ kind: 'maid', date: today });
     assert.match(maid.body, /三次算了/u);
-
-    await definitions.get('diary_write').execute({
-      kind: 'interview',
-      date: today,
-      mood: '有点累',
-      body: '## 问：今天最累的一刻？\n答：改了三遍配置。\n',
-    });
-    const interview = await definitions.get('diary_read').execute({ kind: 'interview', date: today });
-    assert.match(interview.body, /改了三遍配置/u);
 
     await definitions.get('diary_write').execute({ kind: 'profile', body: '# 主人侧写\n\n- [2026-10-23][事实] 在写日记插件。\n' });
     const profile = await definitions.get('diary_read').execute({ kind: 'profile' });
