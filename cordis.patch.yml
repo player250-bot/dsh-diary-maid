@@ -12,6 +12,7 @@
       name: dsh-diary-maid
       config:
         vaultPath: /sdcard/dsh日记/vault
+        workspace: /sdcard/dsh日记
         git: true
         dayCutoffHour: 4
         timeZone: Asia/Shanghai

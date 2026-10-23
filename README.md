@@ -43,6 +43,7 @@ plugin_manager install_bundle <本目录绝对路径>
 | 键 | 默认 | 说明 |
 | --- | --- | --- |
 | `vaultPath` | `~/dsh-diary` | 日记本根目录；不存在会自动创建并 `git init` |
+| `workspace` | `vaultPath` 的上级 | 日记 workspace；只有在这个目录下的会话才会看到「晚安仪式」skill |
 | `git` | `true` | 每次保存自动提交；关掉则只用文件快照 |
 | `dayCutoffHour` | `4` | 凌晨 4 点前算"前一天" |
 
