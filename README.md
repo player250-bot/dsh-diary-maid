@@ -34,7 +34,7 @@ dsh plugin --profile web add github:<你的用户名>/dsh-diary-maid
 plugin_manager install_bundle <本目录绝对路径>
 ```
 
-安装后在侧边栏点鲸鱼图标，或重启 Web 界面。
+安装后在侧边栏点「鲸汐」图标；如果没看到，刷新一次页面。
 
 ## 配置
 
