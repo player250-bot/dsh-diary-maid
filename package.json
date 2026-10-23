@@ -24,6 +24,7 @@
     "lib",
     "locale",
     "persona",
+    "skills",
     "assets",
     "docs",
     "cordis.patch.yml",
