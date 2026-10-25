@@ -40,3 +40,14 @@ test('the panel never registers a workspace or starts a session on mount', () =>
   assert.match(host, /async function lookupWorkspace\(registry\)/u);
   assert.match(host, /ctx\.inject\(\['workspaceRegistry'\]/u);
 });
+
+test('each save row has a manage entry and hard delete asks inside the drawer', () => {
+  assert.match(client, /className: 'dm-saverow-more'/u);
+  assert.match(client, /openSaveManage\(save\)/u);
+  assert.match(client, /const renderSaveConfirm = \(\) =>/u);
+  assert.match(client, /className: 'dm-overlay dm-confirm'/u);
+  assert.match(client, /saves\.manage\.deleteConfirm/u);
+  assert.match(client, /confirmDelete: true/u);
+  assert.match(client, /hard=1/u);
+  assert.match(client, /saves\.refreshSessions/u);
+});

@@ -245,3 +245,91 @@ test('startup never registers a workspace or starts a session', async () => {
     assert.deepEqual(sessionsCreated, [], 'mount must not create a session');
   });
 });
+
+/** Seed a diary page so `PUT /api/entry` merges an existing status. */
+async function seedPage(root, date, status) {
+  const target = path.join(root, date.slice(0, 4), date.slice(5, 7), `${date}.md`);
+  await fs.mkdir(path.dirname(target), { recursive: true });
+  await fs.writeFile(target, `---\nstatus: ${status}\ntitle: 已有页\ndate: ${date}\n---\n\n原来的正文\n`, 'utf8');
+  return target;
+}
+
+test('PUT /api/entry on a final page seals the day; a draft page does not', async () => {
+  await withHost(async ({ routes, root }) => {
+    const finalDate = '2026-10-25';
+    const draftDate = '2026-10-26';
+    await seedPage(root, finalDate, 'final');
+    await seedPage(root, draftDate, 'draft');
+    await call(routes, 'POST', `${API}/saves`, { sessionId: 'session-final', date: finalDate });
+    await call(routes, 'POST', `${API}/saves`, { sessionId: 'session-draft', date: draftDate });
+
+    const saved = await call(routes, 'PUT', `${API}/entry?date=${finalDate}`, { date: finalDate, body: '改了个错字。\n' });
+    assert.equal(saved.status, 200);
+    assert.equal(saved.json.entry.meta.status, 'final');
+
+    const draft = await call(routes, 'PUT', `${API}/entry?date=${draftDate}`, { date: draftDate, body: '草稿正文。\n' });
+    assert.equal(draft.status, 200);
+    assert.equal(draft.json.entry.meta.status, 'draft');
+
+    const table = (await call(routes, 'GET', `${API}/saves`)).json;
+    const sealed = table.saves.find((save) => save.sessionId === 'session-final');
+    const stillDraft = table.saves.find((save) => save.sessionId === 'session-draft');
+    assert.equal(sealed.status, 'sealed');
+    assert.notEqual(sealed.sealedAt, null);
+    assert.equal(stillDraft.status, 'active');
+  });
+});
+
+test('a broken saves table never fails a final page write', async () => {
+  await withHost(async ({ routes, root }) => {
+    const date = '2026-10-25';
+    await seedPage(root, date, 'final');
+    const table = path.join(root, '.diary/saves.json');
+    await fs.mkdir(path.dirname(table), { recursive: true });
+    await fs.writeFile(table, '{"version":1,"saves":[', 'utf8');
+
+    const saved = await call(routes, 'PUT', `${API}/entry?date=${date}`, { date, body: '表坏了也要写。\n' });
+    assert.equal(saved.status, 200);
+    assert.equal(saved.json.ok, true);
+    assert.equal(saved.json.entry.meta.status, 'final');
+    assert.equal(await fs.readFile(table, 'utf8'), '{"version":1,"saves":[');
+  });
+});
+
+test('the saves API manages title, tags, note, archive and restore', async () => {
+  await withHost(async ({ routes }) => {
+    const created = await call(routes, 'POST', `${API}/saves`, {
+      sessionId: 'session-a',
+      date: '2026-10-25',
+      title: '日记 · 2026-10-25',
+    });
+    const id = created.json.save.id;
+
+    const edited = await call(routes, 'PUT', `${API}/saves`, {
+      id,
+      title: '  新名字  ',
+      tags: [' 工作 ', '夜', '工作'],
+      note: '聊到很晚。',
+    });
+    assert.equal(edited.status, 200);
+    assert.equal(edited.json.save.title, '新名字');
+    assert.deepEqual(edited.json.save.tags, ['工作', '夜']);
+    assert.equal(edited.json.save.note, '聊到很晚。');
+
+    const sealed = await call(routes, 'PUT', `${API}/saves`, { id, status: 'sealed' });
+    assert.equal(sealed.json.save.status, 'sealed');
+    assert.notEqual(sealed.json.save.sealedAt, null);
+
+    const archived = await call(routes, 'PUT', `${API}/saves`, { id, status: 'archived' });
+    assert.equal(archived.json.save.status, 'archived');
+
+    const restored = await call(routes, 'PUT', `${API}/saves`, { id, status: 'active' });
+    assert.equal(restored.json.save.status, 'active');
+    assert.equal(restored.json.save.sealedAt, null);
+
+    const removed = await call(routes, 'DELETE', `${API}/saves?id=${encodeURIComponent(id)}&hard=1`);
+    assert.equal(removed.status, 200);
+    assert.equal(removed.json.deleted, true);
+    assert.equal((await call(routes, 'GET', `${API}/saves`)).json.saves.length, 0);
+  });
+});
