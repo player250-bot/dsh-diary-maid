@@ -102,6 +102,7 @@ async function withHost(run, options = {}) {
   const renamed = [];
   const resolved = [];
   const resolveCalled = [];
+  const sessionsCreated = [];
   const services = {
     workspaceRegistry: {
       resolveByPath: async (target) => {
@@ -115,16 +116,19 @@ async function withHost(run, options = {}) {
     },
     sessionController: {
       list: async () => ({ items: [] }),
-      create: async () => ({ sessionId: 'session-host' }),
+      create: async (options) => {
+        sessionsCreated.push(options);
+        return { sessionId: 'session-host' };
+      },
       rename: async ({ sessionId, title }) => { renamed.push({ sessionId, title }); },
     },
   };
   const ctx = harness(services);
   apply(ctx, { vaultPath: root, workspace: root, git: false, dayCutoffHour: 4, timeZone: 'Asia/Shanghai' });
   try {
-    // ensureWorkspace is fire-and-forget: wait for its first observable step.
+    // The workspace lookup is fire-and-forget: wait for its first observable step.
     await waitFor(() => resolved.length > 0);
-    await run({ routes: ctx.routes, renamed, resolved, resolveCalled, services, root });
+    await run({ routes: ctx.routes, renamed, resolved, resolveCalled, sessionsCreated, services, root });
   } finally {
     ctx.dispose();
     await fs.rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 30 }).catch(() => {});
@@ -232,11 +236,12 @@ test('a workspace that already owns the directory is reused', async () => {
   }, { existingWorkspace: true });
 });
 
-test('startup registers the vault directory as a workspace once', async () => {
-  await withHost(async ({ resolveCalled }) => {
-    await waitFor(() => resolveCalled.length > 0);
-    assert.equal(resolveCalled.length, 1);
-    assert.equal(resolveCalled[0].title, '鲸汐的抽屉');
-    assert.ok(resolveCalled[0].target.endsWith('diary-api-') || resolveCalled[0].target.includes(os.tmpdir()));
+test('startup never registers a workspace or starts a session', async () => {
+  await withHost(async ({ resolveCalled, resolved, sessionsCreated }) => {
+    await waitFor(() => resolved.length > 0);
+    // Regression (task-17): registering at mount added an empty workspace with a
+    // blank seat session; the diary plugin must never do that on its own.
+    assert.deepEqual(resolveCalled, [], 'mount must not create a workspace');
+    assert.deepEqual(sessionsCreated, [], 'mount must not create a session');
   });
 });
