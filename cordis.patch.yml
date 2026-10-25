@@ -3,7 +3,7 @@
 # ============================================================================
 # 安装后向 profile 注入一行宿主插件；面板由 dsh.client 声明单独加载。
 #
-#   vaultPath：日记本根目录。默认 ~/dsh-diary；本机指向工作区下的 vault/。
+#   vaultPath：日记本根目录。默认 ~/dsh-diary；本机指向 /sdcard/diary-vault。
 #              目录不存在时插件会自动创建（含 git init）。
 # ============================================================================
 
@@ -11,8 +11,8 @@
     - id: dsh-diary-maid
       name: dsh-diary-maid
       config:
-        vaultPath: /sdcard/dsh日记/vault
-        workspace: /sdcard/dsh日记
+        vaultPath: /sdcard/diary-vault
+        workspace: /sdcard/diary-vault
         git: true
         dayCutoffHour: 4
         timeZone: Asia/Shanghai
