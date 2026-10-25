@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.6.0 — 2026-10-26
+
+### Added
+
+- 会话存档：点「开始聊」先开存档抽屉，可继续今天的档、切换已有档、新建存档、读取未绑定会话。
+- `.diary/saves.json`：一段对话 + 一组日记日期；`dates[]` 为真相，`bindings` 派生；
+  gitignore，不进日记历史；日记 frontmatter 不加 sessionId。
+- `/api/saves` GET/POST/PUT/DELETE；新建走客户端 `sessions.create`，避免 `unknown session`。
+- 日记本迁到独立工作区 `/sdcard/diary-vault`，启动时自动注册「鲸汐的抽屉」。
+
+### Changed
+
+- 「开始聊」不再直接预填当前会话；所有 `await` 在 `openSession` 之前，之后只同步预填。
+- 「回到对话」保持只关面板；读取旧档不预填。
+
+### Fixed
+
+- 房间页缺失的 7 个文案键（房间列表 / 开新房间 / 进入 / 空态等）。
+
 ## 0.5.1 — 2026-10-25
 
 ### Changed
