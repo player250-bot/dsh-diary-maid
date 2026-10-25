@@ -1,6 +1,6 @@
 {
   "name": "dsh-diary-maid",
-  "version": "0.6.1",
+  "version": "0.6.2",
   "description": "鲸汐 · DSH 日记女仆：蓝色鲸鱼女仆替主人保管日记，一天一页，独立 git 仓库，可回退",
   "keywords": [
     "dsh",

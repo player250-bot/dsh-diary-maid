@@ -103,7 +103,15 @@ async function withHost(run, options = {}) {
   const resolved = [];
   const resolveCalled = [];
   const sessionsCreated = [];
+  const tools = {
+    registered: new Map(),
+    register(definition) {
+      tools.registered.set(definition.name, definition);
+      return () => tools.registered.delete(definition.name);
+    },
+  };
   const services = {
+    tools,
     workspaceRegistry: {
       resolveByPath: async (target) => {
         resolved.push(target);
@@ -128,7 +136,7 @@ async function withHost(run, options = {}) {
   try {
     // The workspace lookup is fire-and-forget: wait for its first observable step.
     await waitFor(() => resolved.length > 0);
-    await run({ routes: ctx.routes, renamed, resolved, resolveCalled, sessionsCreated, services, root });
+    await run({ routes: ctx.routes, renamed, resolved, resolveCalled, sessionsCreated, services, tools, root });
   } finally {
     ctx.dispose();
     await fs.rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 30 }).catch(() => {});
@@ -331,5 +339,29 @@ test('the saves API manages title, tags, note, archive and restore', async () =>
     assert.equal(removed.status, 200);
     assert.equal(removed.json.deleted, true);
     assert.equal((await call(routes, 'GET', `${API}/saves`)).json.saves.length, 0);
+  });
+});
+
+test('the host wires the room boundary into the real diary_write tool', async () => {
+  await withHost(async ({ tools, root }) => {
+    const write = tools.registered.get('diary_write');
+    assert.notEqual(write, undefined, 'the host must register diary_write');
+    const roomSession = {
+      seq: 1,
+      eventAt: () => ({ type: 'tool/call', data: { name: 'skill', arguments: '{"name":"room-chat"}' } }),
+    };
+    await assert.rejects(
+      () => write.execute({ kind: 'diary', date: '2026-10-25', body: '房间里不写。\n', mode: 'final' }, { agent: { session: roomSession } }),
+      /房间里不写日记/u,
+    );
+    await assert.rejects(() => fs.access(path.join(root, '2026/10/2026-10-25.md')), /ENOENT/u);
+
+    const studySession = {
+      seq: 1,
+      eventAt: () => ({ type: 'tool/call', data: { name: 'skill', arguments: '{"name":"diary-ritual"}' } }),
+    };
+    const saved = await write.execute({ kind: 'diary', date: '2026-10-25', body: '书房照常写。\n' }, { agent: { session: studySession } });
+    assert.equal(saved.path, '2026/10/2026-10-25.md');
+    assert.match(await fs.readFile(path.join(root, saved.path), 'utf8'), /书房照常写/u);
   });
 });

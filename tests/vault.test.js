@@ -182,3 +182,60 @@ test('maid and profile pages use their own paths', async () => {
     assert.equal(read.meta.mood, '尾巴有点晃');
   });
 });
+
+test('appendProfile only adds lines, keeps old bytes and commits a snapshot', async () => {
+  await withVault(async (vault, root) => {
+    const file = path.join(root, '侧写', '主人.md');
+    const before = '# 主人侧写\n\n## 近期状态\n\n- [2026-10-24][事实] 旧的。\n\n## 雷区\n\n- 别催。\n';
+    await fs.mkdir(path.dirname(file), { recursive: true });
+    await fs.writeFile(file, before, 'utf8');
+
+    const first = await vault.appendProfile([{ text: '在收尾插件', kind: 'fact' }], { today: '2026-10-25' });
+    assert.deepEqual({ path: first.path, added: first.added, skipped: first.skipped }, { path: '侧写/主人.md', added: 1, skipped: 0 });
+    const afterFirst = await fs.readFile(file, 'utf8');
+    assert.equal(afterFirst, `${before}\n- [2026-10-25][事实] 在收尾插件\n`, 'nothing but the new line may change');
+
+    // A section insertion splices one line in; the rest of the file stays identical.
+    const second = await vault.appendProfile([{ text: '新的近期条目', kind: 'fact' }], { today: '2026-10-25', section: '近期状态' });
+    assert.equal(second.added, 1);
+    const afterSecond = await fs.readFile(file, 'utf8');
+    assert.equal(afterSecond.replace('- [2026-10-25][事实] 新的近期条目\n', ''), afterFirst);
+    assert.match(afterSecond, /- \[2026-10-24\]\[事实\] 旧的。\n- \[2026-10-25\]\[事实\] 新的近期条目\n/u);
+
+    // Repeating the exact entry is a no-op, not a second line.
+    const third = await vault.appendProfile([{ text: '新的近期条目', kind: 'fact' }], { today: '2026-10-25', section: '近期状态' });
+    assert.equal(third.added, 0);
+    assert.equal(third.skipped, 1);
+    assert.equal(await fs.readFile(file, 'utf8'), afterSecond);
+
+    const history = await vault.git.log('侧写/主人.md', 10);
+    assert.ok(history.length >= 2, 'every append must be committed');
+    assert.match(history[0].subject, /侧写追加/u);
+    const snapshots = (await fs.readdir(path.join(root, '.diary/history'))).filter((name) => name.startsWith('侧写-主人-'));
+    assert.ok(snapshots.length >= 2, 'the previous text is snapshotted before it is replaced');
+  });
+});
+
+test('appendProfile validates entries, defaults the date and leaves diary pages alone', async () => {
+  await withVault(async (vault, root) => {
+    await vault.write('diary', '2026-10-25', { meta: { private: true, title: '私密' }, body: '不要导出。\n' });
+    const diaryFile = path.join(root, '2026/10/2026-10-25.md');
+    const beforeDiary = await fs.readFile(diaryFile, 'utf8');
+
+    await assert.rejects(() => vault.appendProfile([], { today: '2026-10-25' }), /至少/u);
+    await assert.rejects(() => vault.appendProfile([{ text: '  ', kind: 'fact' }], { today: '2026-10-25' }), /不能为空/u);
+    await assert.rejects(() => vault.appendProfile([{ text: 'x', kind: 'wat' }], { today: '2026-10-25' }), /kind/u);
+    await assert.rejects(() => vault.appendProfile([{ text: 'x', kind: 'fact', date: '2026-02-30' }], { today: '2026-10-25' }), /日期/u);
+    await assert.rejects(
+      () => vault.appendProfile(Array.from({ length: 21 }, () => ({ text: 'x', kind: 'fact' })), { today: '2026-10-25' }),
+      /最多/u,
+    );
+
+    const today = vault.today();
+    await vault.appendProfile([{ text: '默认日期', kind: 'guess' }]);
+    const profile = await fs.readFile(path.join(root, '侧写', '主人.md'), 'utf8');
+    assert.match(profile, new RegExp(`- \\[${today}\\]\\[推测\\] 默认日期`, 'u'));
+
+    assert.equal(await fs.readFile(diaryFile, 'utf8'), beforeDiary, 'a private diary page is untouched');
+  });
+});

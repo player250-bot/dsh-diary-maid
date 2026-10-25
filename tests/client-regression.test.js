@@ -6,8 +6,10 @@ import test from 'node:test';
 // so a regression fails loudly in CI even though the drawer itself is React.
 const clientPath = new URL('../lib/client.js', import.meta.url);
 const hostPath = new URL('../lib/index.js', import.meta.url);
+const packagePath = new URL('../package.json', import.meta.url);
 const client = await readFile(clientPath, 'utf8');
 const host = await readFile(hostPath, 'utf8');
+const pkg = JSON.parse(await readFile(packagePath, 'utf8'));
 
 test('the panel carries a visible version the master can read back', () => {
   assert.match(client, /const VERSION = 'v\d+\.\d+\.\d+';/u);
@@ -51,3 +53,57 @@ test('each save row has a manage entry and hard delete asks inside the drawer', 
   assert.match(client, /hard=1/u);
   assert.match(client, /saves\.refreshSessions/u);
 });
+
+test('a room row renames through PUT /api/sessions and only reports success after it is confirmed', () => {
+  const start = client.indexOf('const roomTitleOf =');
+  const end = client.indexOf('const viewRoom =');
+  assert.ok(start > 0 && end > start, 'room rename helpers must exist');
+  const rename = client.slice(start, end);
+  assert.match(client, /request\('\/sessions', \{ method: 'PUT', body: JSON\.stringify\(\{ id: current\.id, title: name \}\) \}\);/u);
+  // trim to 40 characters, never send an empty name
+  assert.match(rename, /replace\(\/\\s\+\/gu, ' '\)\.trim\(\)\.slice\(0, 40\)/u);
+  assert.match(rename, /room\.renameEmpty/u);
+  // busy guard: a second tap cannot start a second rename
+  assert.match(rename, /roomRenameBusyRef\.current/u);
+  // success is only claimed after GET /sessions or the client displayTitle agrees
+  assert.match(rename, /fresh = await request\('\/sessions'\)/u);
+  assert.match(rename, /row\.displayTitle \?\? row\.title/u);
+  assert.match(rename, /roomTitleNow\(current\.id\) === name/u);
+  assert.match(rename, /room\.renameUnconfirmed/u);
+  assert.match(rename, /room\.renameDone/u);
+  // the row keeps the entry inline
+  assert.match(client, /event\.stopPropagation\(\);\s*startRoomRename\(item\);/u);
+  assert.match(client, /className: 'dm-roomedit-error'/u);
+});
+
+test('room rename and save management ask inside the panel, never with native dialogs', () => {
+  assert.equal(/window\.alert\s*\(/u.test(client), false, 'no native alert anywhere');
+  assert.equal(/window\.prompt\s*\(/u.test(client), false, 'no native prompt anywhere');
+  const rename = client.slice(client.indexOf('const startRoomRename ='), client.indexOf('const viewRoom ='));
+  const saves = client.slice(client.indexOf('// ---- Session saves'), client.indexOf('const closePanel ='));
+  assert.equal(/window\.confirm\s*\(/u.test(rename), false, 'room rename must not use window.confirm');
+  assert.equal(/window\.confirm\s*\(/u.test(saves), false, 'save management must not use window.confirm');
+  // The one remaining native confirm is the pre-existing history revert.
+  assert.equal((client.match(/window\.confirm\s*\(/gu) ?? []).length, 1);
+});
+
+test('360–430px phones get overflow guards for the six tabs and the saves drawer', () => {
+  const start = client.indexOf('@media (max-width:430px)');
+  assert.ok(start > 0, 'the 430px breakpoint must exist');
+  const narrow = client.slice(start, client.indexOf('`;', start));
+  for (const selector of ['.dm-header', '.dm-body', '.dm-saverow', '.dm-manage-actions', '.dm-confirm-card', '.dm-roomrow', '.dm-prose', '.dm-toast']) {
+    assert.ok(narrow.includes(selector), `${selector} needs a narrow-screen rule`);
+  }
+  assert.match(narrow, /\.dm-saverow\{[^}]*min-width:0/u);
+  assert.match(narrow, /\.dm-manage-actions>\s*\.dm-btn\{[^}]*min-width:0/u);
+  assert.match(narrow, /\.dm-confirm-card\{[^}]*overflow-y:auto/u);
+  assert.match(narrow, /\.dm-roomrow-title\{[^}]*overflow-wrap:anywhere/u);
+  assert.match(narrow, /\.dm-toast\{[^}]*max-width:calc\(100% - 24px\)/u);
+});
+
+test('the panel version string matches package.json', () => {
+  const version = /const VERSION = 'v(\d+\.\d+\.\d+)';/u.exec(client);
+  assert.ok(version !== null, 'VERSION must stay parseable');
+  assert.equal(version[1], pkg.version);
+});
+

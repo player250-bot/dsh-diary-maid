@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.6.2 — 2026-10-26
+
+### Added
+
+- 房间不写日记做成**硬边界**：房间会话调 `diary_write(kind='diary')` 直接报错、不落盘；
+  `maid`/`profile` 仍可用，书房行为不变。判定读会话自己的持久事件日志
+  （`tool/call` 里的 `room-chat`/`diary-ritual`、`room_log` 调用、`session/title` 的「房间 · …」），
+  不靠提示词；判不出来按书房放行并 warn 一次（宁可少拦）。
+- `profile_append` 工具：侧写只增追加，旧正文逐字节保留、幂等去重、覆盖前快照 + git commit。
+- 房间列表手动改名（`PUT /api/sessions`），改名后核对 `displayTitle`，没存上会明说，不假成功。
+- 360–430px 窄屏规则：六个视图与存档抽屉/管理页/确认层不横向溢出。
+
+### Changed
+
+- 面板版本 `v0.6.2 · 2026-10-26.4`；`diary_write` 描述里明确「房间写日记会被拒绝」「侧写优先用 profile_append」。
+- 测试 55 条（新增边界判定、profile_append、房间改名与窄屏守卫）。
+
 ## 0.6.1 — 2026-10-26
 
 ### Added

@@ -5,8 +5,27 @@ import path from 'node:path';
 import test from 'node:test';
 import { Vault } from '../lib/vault.js';
 import { registerDiaryTools } from '../lib/tools.js';
+import { detectWritingScope } from '../lib/scope.js';
 
-async function harness() {
+/** Test double for a session log (real DSH Sessions answer `eventAt()`/`seq`). */
+function sessionOf(events) {
+  return { snapshotEvents: () => events };
+}
+
+function toolCall(name, args) {
+  return { type: 'tool/call', data: { name, arguments: args === undefined ? '{}' : JSON.stringify(args) } };
+}
+
+function execOf(session) {
+  return session === undefined ? undefined : { agent: { session } };
+}
+
+/** The same resolver the host wires in lib/index.js. */
+function liveScope(exec) {
+  return detectWritingScope(exec?.agent?.session);
+}
+
+async function harness(options = {}) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'diary-tools-'));
   const vault = new Vault(root, { git: true, dayCutoffHour: 4, timeZone: 'Asia/Shanghai' });
   await vault.ensure();
@@ -23,14 +42,19 @@ async function harness() {
       },
     },
   };
-  registerDiaryTools(ctx, { vault, refreshCard: () => {} });
+  registerDiaryTools(ctx, {
+    vault,
+    refreshCard: () => {},
+    resolveSessionScope: options.resolveSessionScope,
+    sealDiaryDay: options.sealDiaryDay,
+  });
   return { root, vault, definitions };
 }
 
-test('registers exactly the six diary tools', async () => {
+test('registers exactly the seven diary tools', async () => {
   const { root, definitions } = await harness();
   try {
-    assert.deepEqual([...definitions.keys()].sort(), ['diary_capture', 'diary_read', 'diary_write', 'memory_search', 'room_log', 'room_read']);
+    assert.deepEqual([...definitions.keys()].sort(), ['diary_capture', 'diary_read', 'diary_write', 'memory_search', 'profile_append', 'room_log', 'room_read']);
     for (const definition of definitions.values()) {
       assert.equal(typeof definition.execute, 'function');
       assert.equal(typeof definition.output.render, 'function');
@@ -116,6 +140,106 @@ test('diary_write handles maid pages and the profile', async () => {
     const profile = await definitions.get('diary_read').execute({ kind: 'profile' });
     assert.equal(profile.exists, true);
     assert.match(profile.body, /\[事实\]/u);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test('a room session cannot write the diary, but her diary and the profile still work', async () => {
+  const { root, vault, definitions } = await harness({ resolveSessionScope: liveScope });
+  try {
+    const today = vault.today();
+    const exec = execOf(sessionOf([toolCall('skill', { name: 'room-chat' })]));
+
+    await assert.rejects(
+      () => definitions.get('diary_write').execute({ kind: 'diary', date: today, body: '今天……\n', mode: 'final' }, exec),
+      /房间里不写日记/u,
+    );
+    assert.equal((await vault.read('diary', today)).exists, false, 'a refused write must not touch the page');
+
+    // Her diary and the profile are allowed in the room: room talk only has a light touch.
+    const maid = await definitions.get('diary_write').execute({ kind: 'maid', date: today, body: '他在房间里坐了一会儿。\n' }, exec);
+    assert.equal(maid.kind, 'maid');
+    const profile = await definitions.get('profile_append').execute({ entries: [{ text: '在房间里坐了一会儿', kind: 'fact' }] }, exec);
+    assert.deepEqual({ added: profile.added, skipped: profile.skipped }, { added: 1, skipped: 0 });
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test('a study session still writes and finalises the diary (P2 seal untouched)', async () => {
+  const sealed = [];
+  const { root, vault, definitions } = await harness({
+    resolveSessionScope: liveScope,
+    sealDiaryDay: async (date) => { sealed.push(date); },
+  });
+  try {
+    const today = vault.today();
+    const exec = execOf(sessionOf([toolCall('skill', { name: 'diary-ritual' })]));
+    const saved = await definitions.get('diary_write').execute({
+      kind: 'diary',
+      date: today,
+      body: '今天把边界补上了。\n',
+      mode: 'final',
+    }, exec);
+    assert.equal(saved.status, 'final');
+    const entry = await vault.read('diary', today);
+    assert.equal(entry.exists, true);
+    assert.equal(entry.meta.status, 'final');
+    assert.deepEqual(sealed, [today], 'a final diary page must still settle the day');
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test('when the session state cannot be read, the diary write is allowed (fail safe)', async () => {
+  const { root, vault, definitions } = await harness({
+    resolveSessionScope: () => { throw new Error('session unavailable'); },
+  });
+  try {
+    const today = vault.today();
+    const saved = await definitions.get('diary_write').execute({ kind: 'diary', date: today, body: '书房照常写。\n' });
+    assert.equal(saved.status, 'draft');
+    const entry = await vault.read('diary', today);
+    assert.equal(entry.exists, true, 'an unknown session must never be treated as a room');
+    assert.match(entry.body, /书房照常写/u);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test('profile_append appends, skips duplicates and reports through its render', async () => {
+  const { root, vault, definitions } = await harness();
+  try {
+    const today = vault.today();
+    const tool = definitions.get('profile_append');
+    const first = await tool.execute({
+      entries: [
+        { text: '在收尾插件', kind: 'fact' },
+        { text: '可能有点困', kind: 'guess' },
+      ],
+    });
+    assert.deepEqual({ path: first.path, added: first.added, skipped: first.skipped }, { path: '侧写/主人.md', added: 2, skipped: 0 });
+    const raw1 = await fs.readFile(path.join(root, '侧写', '主人.md'), 'utf8');
+    assert.match(raw1, new RegExp(`- \\[${today}\\]\\[事实\\] 在收尾插件`, 'u'));
+    assert.match(raw1, new RegExp(`- \\[${today}\\]\\[推测\\] 可能有点困`, 'u'));
+
+    const second = await tool.execute({
+      entries: [
+        { text: '在收尾插件', kind: 'fact' },
+        { text: ' 新的观察 ', kind: 'fact', date: today },
+      ],
+    });
+    assert.equal(second.added, 1);
+    assert.equal(second.skipped, 1);
+    const raw2 = await fs.readFile(path.join(root, '侧写', '主人.md'), 'utf8');
+    assert.ok(raw2.startsWith(raw1), 'the old profile text must stay byte-for-byte');
+    assert.match(raw2, /\[事实\] 新的观察/u);
+
+    const rendered = tool.output.render({}, second);
+    assert.match(rendered[0].text, /侧写追加好了：1 条，跳过 1 条重复/u);
+
+    await assert.rejects(() => tool.execute({ entries: [{ text: '  ', kind: 'fact' }] }), /不能为空/u);
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }
