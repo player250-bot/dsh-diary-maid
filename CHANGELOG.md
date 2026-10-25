@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.6.3 — 2026-10-26
+
+### Added
+
+- 房间归档/恢复：`.diary/rooms.json` 本地表 + `PUT/DELETE /api/rooms`；归档只把房间从列表收起，
+  不删对话、不删房间日志、不 commit、不碰日记；坏表只读不覆盖；「显示归档」可恢复。
+- `PUT /api/sessions` 返回真实结果：成功 `renamed:true`，失败 200 + `renamed:false` + error，
+  不再假成功；`room_log` 内部顺带改名仍吞错。
+- **人设 v4**：新增「四种腔一次都不许出现」（格言/总结/记录/玄乎）、「灵动三做法」（抓词/落地/有来有回）、
+  口头禅与动作库、以及来自真实对话的反例黑名单 + 改写。
+- 房间不再喊「记下了」：今日卡片提示词区分书房/房间，房间 skill 明确不调用 `diary_capture`、不宣告记录。
+
+### Changed
+
+- 人设约 10KB；vault `人设/鲸汐.md` 与 `persona/鲸汐.md` 同步为 v4（热更新约 1.5s，不用重载）。
+- 测试 62 条（房间归档/坏表/sessions 真实 renamed/前端守卫）。
+- 面板版本 `v0.6.3 · 2026-10-26.5`；`npm run check` 纳入 `lib/rooms.js`。
+
 ## 0.6.2 — 2026-10-26
 
 ### Added

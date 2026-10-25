@@ -5,6 +5,7 @@ import path from 'node:path';
 import { PassThrough } from 'node:stream';
 import test from 'node:test';
 import { apply } from '../lib/index.js';
+import { RoomStore } from '../lib/rooms.js';
 
 const API = '/dsh-diary/api';
 
@@ -363,5 +364,140 @@ test('the host wires the room boundary into the real diary_write tool', async ()
     const saved = await write.execute({ kind: 'diary', date: '2026-10-25', body: '书房照常写。\n' }, { agent: { session: studySession } });
     assert.equal(saved.path, '2026/10/2026-10-25.md');
     assert.match(await fs.readFile(path.join(root, saved.path), 'utf8'), /书房照常写/u);
+  });
+});
+
+test('RoomStore archives, restores and never overwrites a broken table', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'diary-rooms-'));
+  try {
+    const store = new RoomStore(root, { timeZone: 'Asia/Shanghai' });
+    assert.deepEqual((await store.read()).rooms, []);
+    assert.equal((await store.read()).exists, false);
+
+    const first = await store.archive('session-a', '  夜话  ');
+    assert.equal(first.created, true);
+    assert.equal(first.room.title, '夜话');
+    assert.deepEqual((await store.list()).map((room) => room.sessionId), ['session-a']);
+    const table = JSON.parse(await fs.readFile(path.join(root, '.diary/rooms.json'), 'utf8'));
+    assert.equal(table.version, 1);
+    assert.equal(table.rooms.length, 1);
+    assert.equal(table.rooms[0].status, 'archived');
+
+    // idempotent: same row, same stamp
+    const again = await store.archive('session-a');
+    assert.equal(again.created, false);
+    assert.equal(again.room.archivedAt, first.room.archivedAt);
+    assert.equal((await store.list()).length, 1);
+
+    const restored = await store.restore('session-a');
+    assert.equal(restored.room.status, 'active');
+    assert.deepEqual(await store.list(), []);
+    await assert.rejects(() => store.restore('session-a'), (error) => error.status === 404);
+
+    // corrupt table: read degrades, writes refuse, the file stays byte-identical
+    await fs.writeFile(path.join(root, '.diary/rooms.json'), '{"rooms":"nope"}', 'utf8');
+    const brokenState = await store.read();
+    assert.equal(brokenState.broken, true);
+    assert.deepEqual(brokenState.rooms, []);
+    await assert.rejects(() => store.archive('session-b'), (error) => error.status === 409);
+    assert.equal(await fs.readFile(path.join(root, '.diary/rooms.json'), 'utf8'), '{"rooms":"nope"}');
+  } finally {
+    await fs.rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 30 }).catch(() => {});
+  }
+});
+
+test('rooms archive and restore only touch the local table', async () => {
+  await withHost(async ({ routes, root, services }) => {
+    services.sessionController.list = async () => ({
+      items: [{ sessionId: 'session-room', origin: 'main', cwd: root, running: false, updatedAt: '2026-10-25T10:00:00.000Z' }],
+    });
+
+    const before = await call(routes, 'GET', `${API}/sessions`);
+    assert.equal(before.json.items.length, 1);
+    assert.equal(before.json.items[0].archived, false);
+
+    const archived = await call(routes, 'PUT', `${API}/rooms`, { id: 'session-room', archived: true, title: '房间 · 夜话' });
+    assert.equal(archived.status, 200);
+    assert.equal(archived.json.room.sessionId, 'session-room');
+    assert.notEqual(archived.json.room.archivedAt, null);
+
+    // the conversation is still listed — only marked
+    const after = await call(routes, 'GET', `${API}/sessions`);
+    assert.equal(after.json.items.length, 1);
+    assert.equal(after.json.items[0].archived, true);
+    assert.notEqual(after.json.items[0].archivedAt, null);
+
+    const merged = await call(routes, 'GET', `${API}/rooms?limit=6`);
+    assert.equal(merged.status, 200);
+    assert.equal(merged.json.broken, false);
+    assert.deepEqual(merged.json.rooms.map((row) => row.id), ['session-room']);
+    assert.equal(merged.json.rooms[0].archived, true);
+    assert.equal(merged.json.archived.length, 1);
+
+    const ignore = await fs.readFile(path.join(root, '.gitignore'), 'utf8');
+    assert.match(ignore, /\.diary\/rooms\.json/u);
+    const table = JSON.parse(await fs.readFile(path.join(root, '.diary/rooms.json'), 'utf8'));
+    assert.equal(table.rooms.length, 1);
+    assert.equal(table.rooms[0].title, '房间 · 夜话');
+
+    // archiving a conversation that no longer exists still works (local table only)
+    const gone = await call(routes, 'PUT', `${API}/rooms`, { id: 'session-gone', archived: true });
+    assert.equal(gone.status, 200);
+    // restoring something that was never archived is a caller error
+    const missing = await call(routes, 'PUT', `${API}/rooms`, { id: 'session-never', archived: false });
+    assert.equal(missing.status, 404);
+
+    // DELETE /api/rooms is the same restore, for callers that prefer it
+    const restored = await call(routes, 'DELETE', `${API}/rooms?id=session-room`);
+    assert.equal(restored.status, 200);
+    assert.equal(restored.json.deleted, true);
+    assert.equal((await call(routes, 'GET', `${API}/sessions`)).json.items[0].archived, false);
+    assert.equal((await call(routes, 'DELETE', `${API}/rooms?id=session-room`)).status, 404);
+
+    assert.equal((await call(routes, 'PUT', `${API}/rooms`, { id: '', archived: true })).status, 400);
+    assert.equal((await call(routes, 'PUT', `${API}/rooms`, { id: 'session-x' })).status, 400);
+    assert.equal((await call(routes, 'PATCH', `${API}/rooms`, {})).status, 405);
+  });
+});
+
+test('a broken rooms table is reported but never overwritten', async () => {
+  await withHost(async ({ routes, root }) => {
+    const table = path.join(root, '.diary/rooms.json');
+    await fs.mkdir(path.dirname(table), { recursive: true });
+    const broken = '{"version":1,"rooms":[';
+    await fs.writeFile(table, broken, 'utf8');
+
+    const merged = await call(routes, 'GET', `${API}/rooms`);
+    assert.equal(merged.status, 200);
+    assert.equal(merged.json.broken, true);
+    assert.deepEqual(merged.json.rooms, []);
+    assert.deepEqual(merged.json.archived, []);
+
+    const refused = await call(routes, 'PUT', `${API}/rooms`, { id: 'session-a', archived: true });
+    assert.equal(refused.status, 409);
+    assert.equal(await fs.readFile(table, 'utf8'), broken);
+  });
+});
+
+test('PUT /api/sessions reports whether the title stuck, and the tool path stays optimistic', async () => {
+  await withHost(async ({ routes, services, tools, renamed }) => {
+    const saved = await call(routes, 'PUT', `${API}/sessions`, { id: 'session-a', title: '新名字' });
+    assert.equal(saved.status, 200);
+    assert.equal(saved.json.ok, true);
+    assert.equal(saved.json.renamed, true);
+    assert.deepEqual(renamed, [{ sessionId: 'session-a', title: '新名字' }]);
+
+    services.sessionController.rename = async () => { throw new Error('rename refused'); };
+    const refused = await call(routes, 'PUT', `${API}/sessions`, { id: 'session-a', title: '又改' });
+    assert.equal(refused.status, 200);
+    assert.equal(refused.json.ok, true);
+    assert.equal(refused.json.renamed, false);
+    assert.match(refused.json.error, /rename refused/u);
+
+    // room_log's own rename is a nicety: the same failure must not fail the log.
+    const write = tools.registered.get('room_log');
+    assert.notEqual(write, undefined, 'the host must register room_log');
+    const entry = await write.execute({ title: '房间一下', body: '她坐了一会儿。' }, { agent: { id: 'session-a' } });
+    assert.match(entry.id, /^\d{4}-\d{2}-\d{2}-\d{6}$/u);
   });
 });

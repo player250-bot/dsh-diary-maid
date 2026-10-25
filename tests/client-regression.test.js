@@ -107,3 +107,44 @@ test('the panel version string matches package.json', () => {
   assert.equal(version[1], pkg.version);
 });
 
+
+test('a room row archives through PUT /api/rooms only after an in-panel confirmation', () => {
+  const archive = client.slice(client.indexOf('// ---- Room archive'), client.indexOf('const viewRoom ='));
+  assert.ok(archive.length > 0, 'room archive helpers must exist');
+  assert.match(archive, /request\('\/rooms', \{[\s\S]{0,160}?archived/u);
+  assert.match(archive, /method: 'PUT'/u);
+  assert.match(archive, /const renderRoomConfirm = \(\) =>/u);
+  assert.match(archive, /className: 'dm-overlay dm-confirm'/u);
+  assert.match(archive, /room\.archiveConfirm/u);
+  assert.match(archive, /room\.archiveConfirmHint/u);
+  // busy guard: a second tap cannot start a second archive
+  assert.match(archive, /roomArchiveBusyRef\.current/u);
+  // a failure stays inside the row
+  assert.match(archive, /room\.archiveFailed/u);
+  assert.match(archive, /room\.restoreDone/u);
+  assert.equal(/window\.confirm\s*\(/u.test(archive), false, 'archiving must ask inside the panel');
+  // the confirm layer is mounted next to the other overlays
+  assert.match(client, /renderRoomConfirm\(\),/u);
+});
+
+test('archived rooms are hidden by default but can be shown and restored', () => {
+  assert.match(client, /const \[showArchived, setShowArchived\] = React\.useState\(false\)/u);
+  assert.match(client, /showArchived \|\| item\.archived !== true/u);
+  assert.match(client, /folded \? t\('room\.restore'\) : t\('room\.archive'\)/u);
+  assert.match(client, /void applyRoomArchive\(item, false\)/u);
+  assert.match(client, /room\.showArchived/u);
+  assert.match(client, /room\.allArchived/u);
+  assert.match(client, /dm-roomrow-archived/u);
+  assert.match(client, /dm-roomrow-folded/u);
+  assert.equal(/rooms\.length === 0\n\s*\? h\('p', \{ className: 'dm-hint' \}, t\('room\.emptyList'\)\)/u.test(client), false);
+});
+
+test('the rename path reads the host renamed flag instead of guessing', () => {
+  const rename = client.slice(client.indexOf('const roomTitleOf ='), client.indexOf('const viewRoom ='));
+  assert.match(rename, /answer\.renamed/u);
+  assert.match(rename, /reported === false/u);
+  assert.match(rename, /room\.renameNotSaved/u);
+  // the displayTitle check stays as the fallback for cold sessions
+  assert.match(rename, /row\.displayTitle \?\? row\.title/u);
+  assert.match(rename, /roomTitleNow\(current\.id\) === name/u);
+});
