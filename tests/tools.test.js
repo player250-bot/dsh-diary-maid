@@ -27,7 +27,7 @@ async function harness() {
   return { root, vault, definitions };
 }
 
-test('registers exactly the three diary tools', async () => {
+test('registers exactly the six diary tools', async () => {
   const { root, definitions } = await harness();
   try {
     assert.deepEqual([...definitions.keys()].sort(), ['diary_capture', 'diary_read', 'diary_write', 'memory_search', 'room_log', 'room_read']);
