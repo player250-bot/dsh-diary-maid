@@ -29,7 +29,7 @@
 ### 从 GitHub 安装
 
 ```bash
-dsh plugin --profile web add github:<你的用户名>/dsh-diary-maid
+dsh plugin --profile web add github:player250-bot/dsh-diary-maid
 ```
 
 ### 本地开发
